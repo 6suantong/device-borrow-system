@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# 数据库与运行时产物（设计仓库不跟踪实际数据）
+*.db
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+data/
+backups/
+*.log
+
+# 分析中间产物（保留最终分析结果 md）
+analysis/tmp/
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.swp
+
+# 操作系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Word 临时文件
+~$*.docx
