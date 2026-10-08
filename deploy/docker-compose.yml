@@ -1,0 +1,40 @@
+# V4 部署形态（单机低负载，FDE 式取舍：够用且可恢复优先）
+# 用法：docker compose up -d
+services:
+  app:
+    build: ./app                     # 应用镜像（Python/Flask + 内置调度器）
+    container_name: lab-borrow
+    restart: always                  # 故障自动拉起
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_PATH=/data/lab_borrow.db  # SQLite（WAL 模式）
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - db-data:/data                # 数据库与 WAL
+      - ./backups:/backups           # 每日备份输出（30 天保留）
+
+  # 每日 02:00 备份任务：SQLite .backup 在线备份，产出可校验的单一文件
+  backup:
+    image: alpine:3.20
+    restart: always
+    entrypoint: >
+      sh -c "while true; do
+        if [ \"$$(date +%%H)\" = \"02\" ] && [ ! -f /backups/.done_today ]; then
+          sqlite3 /data/lab_borrow.db '.backup /backups/lab_borrow_$(date +%%F).db'
+          touch /backups/.done_today;
+        fi;
+        [ \"$$(date +%%H)\" != \"02\" ] && rm -f /backups/.done_today;
+        sleep 300;
+      done"
+    volumes:
+      - db-data:/data
+      - ./backups:/backups
+
+volumes:
+  db-data:
