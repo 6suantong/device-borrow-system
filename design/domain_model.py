@@ -7,8 +7,11 @@
   BR-02 占用唯一性与 BR-04 批准即预留的关键约束；
 - 说明状态机是“唯一写入口”：任何设备状态变化必须经过本模块校验并留痕。
 
-V2 新增：审批责任记录（ApprovalRecord）、审批回避（BR-09）、提交幂等（BR-08）、
-结构化拒绝原因（BR-10）、撤回（BR-05/材料B）、优先级（BR-03）、使用人登记（BR-11）。
+V3 改进（基于运行证据，详见 analysis/v3_analysis_result.md）：
+- IMP-1 占用原子化：approve 改为条件更新语义（数据库层 WHERE state='AVAILABLE'），
+  消除 18% 批准冲突率与 MANUAL_SYNC 人工同步；
+- IMP-2 维修闭环：新增 repair_done() 受控转换（V3 日志出现维修中设备被借出）；
+- IMP-4 领取时限自动执行：auto_release 扫描由每日一次改为每小时（overdue 同）。
 
 运行：python domain_model.py 可执行内置自检（mini 场景验证）。
 """
@@ -217,7 +220,7 @@ class Lab:
                         "ABNORMAL_RETURN_RECORDED" if abnormal else "RETURN_RECORDED",
                         operator, "OK", note)
 
-    # -- 用例 4：超时释放（BR-05，定时任务调用）-------------------------------
+    # -- 用例 4：超时释放（BR-05 / V3 IMP-4，定时任务每小时调用）--------------
     def auto_release_expired(self, now: datetime):
         for req in self.requests.values():
             if req.state == "APPROVED" and now > req.pickup_deadline:
@@ -227,6 +230,25 @@ class Lab:
                                      req.request_id, "SYSTEM")
                 req.state = "RELEASED"
                 self._log_event(req.request_id, "AUTO_RELEASED", "SYSTEM")
+
+    # -- 用例 5：维修完成确认（V3 IMP-2 受控转换，替代 ADMIN_CORRECTION）------
+    def repair_done(self, device_id: str, operator: str, check_note: str):
+        dev = self.devices[device_id]
+        if dev.state != "MAINTENANCE" or not check_note:
+            raise RuleViolation("维修完成须设备处于维修状态且填写检修说明")
+        self._transition(dev, "REPAIR_DONE", "REPAIR_CONFIRMED",
+                         None, operator)
+        self._log_event(None, "REPAIR_DONE_RECORDED", operator, "OK", check_note)
+
+    # -- 用例 6：占用条件更新（V3 IMP-1 数据库层原子化示意）--------------------
+    # 生产实现（以 SQLite/PostgreSQL 为例），单条 UPDATE 原子完成“校验+占用”：
+    #
+    #   UPDATE device SET state='RESERVED'
+    #    WHERE device_id=:dev AND state='AVAILABLE';
+    #   -- rowcount==0 ⇒ 设备已被占用，批准失败回滚并返回 409 DEVICE_UNAVAILABLE
+    #
+    # 该写法使“校验”与“占用”不可分割，从根上消除 V3 日志中
+    # APPROVAL_FAILED_DEVICE_UNAVAILABLE（18%）与 MANUAL_SYNC（18 条）的来源。
 
 
 # ---------------------------------------------------------------------------

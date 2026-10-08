@@ -1,8 +1,9 @@
 -- =============================================================================
 -- 设备借用管理系统 数据库设计（Schema）
--- 当前版本：V2 —— 需求扩展与复杂规则（在 V1 基础上增量演化）
--- 新增/强化：BR-08 提交幂等 / BR-09 审批回避 / BR-10 结构化拒绝原因 /
---           BR-11 实际使用人；BR-03 优先级 / BR-05 领取时限 / BR-06 事务化
+-- 当前版本：V3 —— 基于运行数据改进（在 V2 基础上增量演化）
+-- 改进：IMP-1 占用条件更新原子化 / IMP-2 异常归还事务化+维修闭环 /
+--      IMP-3 超期治理（每小时扫描+重试告警）/ IMP-4 领取时限自动执行 /
+--      IMP-5 提交幂等 / IMP-6 管理端列表索引优化
 -- 对应业务规则：BR-01 状态机 / BR-02 占用唯一性 / BR-03 分类流程 /
 --              BR-04 批准即预留 / BR-05 领取与超时释放 / BR-06 归还检验 /
 --              BR-07 全程留痕
@@ -102,6 +103,7 @@ CREATE TABLE event_log (
 );
 
 -- notification 表 V2 启用：领取提醒（T-24h）/ 超时释放 / 审批结果通知
+-- V3 IMP-3：超期三级通知（前24h/超期时/超期后每日）+ 任务失败告警
 CREATE TABLE notification (
     notification_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id         TEXT NOT NULL REFERENCES user(user_id),
@@ -112,9 +114,22 @@ CREATE TABLE notification (
 );
 
 -- =============================================================================
+-- V3 IMP-6：管理端列表性能优化（V3 运行数据：P95 2428ms → 目标 <800ms）
+-- 状态部分索引：待办列表只扫 PENDING，状态查询走覆盖索引
+-- =============================================================================
+CREATE INDEX idx_request_state_created ON borrow_request(state, created_at);
+CREATE INDEX idx_request_device ON borrow_request(device_id);
+CREATE INDEX idx_state_log_device_time ON state_change_log(device_id, created_at);
+CREATE INDEX idx_event_request ON event_log(request_id);
+CREATE INDEX idx_notification_unread ON notification(user_id, read_at);
+
+-- =============================================================================
 -- 版本变更记录
 -- V1：初始建表（user/device/borrow_request/state_change_log/event_log/notification 预留）
 -- V2：borrow_request 增加 priority/pickup_deadline/withdrawn_at/reject_reason_code/
 --     reject_note；新增 request_co_user（使用人）与 approval_record（审批责任）；
 --     notification 启用；BR-06 异常归还与状态转换强制同事务（应用层约束）
+-- V3：新增 5 个查询索引（IMP-6 列表性能）；应用层改为条件更新实现占用原子性
+--     （IMP-1）；归还事务内强制校验（IMP-2）；新增“维修完成”受控转换（IMP-2）；
+--     定时任务调度 1次/天→1次/小时，失败重试3次+告警（IMP-3）
 -- =============================================================================
