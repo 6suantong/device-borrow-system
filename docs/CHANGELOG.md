@@ -15,4 +15,17 @@
 - API 契约 `design/api-contract.md` 初版。
 - 报告完成 V1 章节（1.1-1.8）。
 
+## V2 —— 需求扩展与复杂规则
+- 变更识别与影响分析：对材料A-D的诉求区分需求/规则/约束/异常/非功能（报告 2.1）。
+- 规则变更：BR-03 审批理由+优先级排序；BR-05 领取时限正式化（pickup_deadline
+  + T-24h 提醒 + 48h 自动释放）；BR-06 异常归还升级为事务约束。
+- 新增规则：BR-08 提交幂等、BR-09 审批回避、BR-10 结构化拒绝原因、
+  BR-11 实际使用人登记。
+- 数据模型：borrow_request 增 5 字段；新增 request_co_user、approval_record；
+  notification 启用（schema.sql）。
+- 领域模型：submit 幂等去重、approve 写审批记录、新增 reject/withdraw；
+  自检覆盖 V2-01/02/04/06（domain_model.py）。
+- API 契约：审批记录端点、优先级/使用人字段、幂等语义（api-contract.md）。
+- 报告完成 V2 章节（2.1-2.6）；V1 能力回归项冻结。
+
 ## （后续版本在此追加）

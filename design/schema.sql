@@ -1,6 +1,8 @@
 -- =============================================================================
 -- 设备借用管理系统 数据库设计（Schema）
--- 当前版本：V1 —— 从需求到工程意图（最小可运行系统方案）
+-- 当前版本：V2 —— 需求扩展与复杂规则（在 V1 基础上增量演化）
+-- 新增/强化：BR-08 提交幂等 / BR-09 审批回避 / BR-10 结构化拒绝原因 /
+--           BR-11 实际使用人；BR-03 优先级 / BR-05 领取时限 / BR-06 事务化
 -- 对应业务规则：BR-01 状态机 / BR-02 占用唯一性 / BR-03 分类流程 /
 --              BR-04 批准即预留 / BR-05 领取与超时释放 / BR-06 归还检验 /
 --              BR-07 全程留痕
@@ -40,13 +42,38 @@ CREATE TABLE borrow_request (
     state            TEXT NOT NULL DEFAULT 'SUBMITTED'
                      CHECK (state IN ('SUBMITTED','UNDER_REVIEW','APPROVED','PICKED_UP',
                                       'RETURNED','REJECTED','WITHDRAWN','RELEASED')),
+    priority         TEXT NOT NULL DEFAULT 'PRACTICE'
+                     CHECK (priority IN ('CONTEST','COURSE','PRACTICE')), -- V2 BR-03
+    pickup_deadline  TEXT,                      -- V2 BR-05：批准时写入 = decided_at + 48h
+    withdrawn_at     TEXT,                      -- V2：撤回时间
+    reject_reason_code TEXT CHECK (reject_reason_code IN
+                     ('SLOT_CONFLICT','DEVICE_STATE','ELIGIBILITY','OTHER')), -- V2 BR-10
+    reject_note      TEXT,
     is_overdue       INTEGER NOT NULL DEFAULT 0,-- BR-07 超期标记
     approver_id      TEXT REFERENCES user(user_id),
-    reject_reason    TEXT,                      -- 拒绝时填写（V1 为自由文本）
+    reject_reason    TEXT,                      -- 拒绝补充说明（V1 为自由文本）
     created_at       TEXT NOT NULL,
     decided_at       TEXT,
     picked_up_at     TEXT,
     returned_at      TEXT
+);
+
+-- V2 BR-11：申请 ↔ 实际使用人（小组共用场景）
+CREATE TABLE request_co_user (
+    request_id   TEXT NOT NULL REFERENCES borrow_request(request_id),
+    user_id      TEXT NOT NULL REFERENCES user(user_id),
+    PRIMARY KEY (request_id, user_id)
+);
+
+-- V2：审批责任记录（谁批准/拒绝、为什么）——材料A“说清是谁作出的决定”
+CREATE TABLE approval_record (
+    approval_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id   TEXT NOT NULL REFERENCES borrow_request(request_id),
+    approver_id  TEXT NOT NULL REFERENCES user(user_id),
+    action       TEXT NOT NULL CHECK (action IN ('APPROVE','REJECT')),
+    reason_code  TEXT,
+    reason       TEXT,
+    created_at   TEXT NOT NULL
 );
 
 -- ---------------------------------------------------------------------------
@@ -74,9 +101,7 @@ CREATE TABLE event_log (
     created_at   TEXT NOT NULL
 );
 
--- ---------------------------------------------------------------------------
--- 4. 通知表（V1 仅预留结构，提醒能力后续版本启用）
--- ---------------------------------------------------------------------------
+-- notification 表 V2 启用：领取提醒（T-24h）/ 超时释放 / 审批结果通知
 CREATE TABLE notification (
     notification_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id         TEXT NOT NULL REFERENCES user(user_id),
@@ -89,4 +114,7 @@ CREATE TABLE notification (
 -- =============================================================================
 -- 版本变更记录
 -- V1：初始建表（user/device/borrow_request/state_change_log/event_log/notification 预留）
+-- V2：borrow_request 增加 priority/pickup_deadline/withdrawn_at/reject_reason_code/
+--     reject_note；新增 request_co_user（使用人）与 approval_record（审批责任）；
+--     notification 启用；BR-06 异常归还与状态转换强制同事务（应用层约束）
 -- =============================================================================
